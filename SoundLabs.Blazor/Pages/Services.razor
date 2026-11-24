@@ -1,0 +1,131 @@
+@page "/services"
+@inject SoundLabsApi Api
+@inject AuthStore Auth
+@inject NavigationManager Nav
+<PageTitle>Сервис — SoundLabs</PageTitle>
+
+<div class="shell page-wrap">
+    <div class="breadcrumbs"><a href="/">Главная</a> / Сервис</div>
+    <h1>Сервисная мастерская</h1>
+    <p class="lead">Настройка, диагностика и ремонт музыкальных инструментов. Оставьте заявку — мастер свяжется с вами.</p>
+
+    @if (loading)
+    {
+        <div class="loader"><div class="eq"><i></i><i></i><i></i><i></i></div>Загружаем услуги…</div>
+    }
+    else
+    {
+        <div class="service-cards">
+            @for (var i = 0; i < services.Count; i++)
+            {
+                var s = services[i];
+                <article class="service-card reveal" style="--i:@i">
+                    <h3>@s.name</h3>
+                    <p>@s.description</p>
+                    <div class="service-meta">
+                        <b>@s.price.ToString("N0") ₽</b>
+                        <span>от @s.durationDays дн.</span>
+                    </div>
+                </article>
+            }
+        </div>
+    }
+
+    <div class="repair-form reveal">
+        <div>
+            <span class="sec-kicker">Заявка на ремонт</span>
+            <h2>Расскажите, что случилось</h2>
+            <p>Укажите инструмент и опишите проблему. Заявка появится в личном кабинете. После назначения менеджером она появится в списке выбранного мастера.</p>
+        </div>
+        <div>
+            <label>Тип инструмента</label>
+            <input @bind="instrumentType" placeholder="Например, электрогитара" />
+            <label>Модель</label>
+            <input @bind="instrumentModel" placeholder="Бренд и модель" />
+            <label>Услуга</label>
+            <select @bind="serviceId">
+                <option value="0">Выберите услугу</option>
+                @foreach (var s in services)
+                {
+                    <option value="@s.id">@s.name</option>
+                }
+            </select>
+            <label>Описание неисправности</label>
+            <textarea @bind="fault" rows="4" placeholder="Опишите проблему подробнее…"></textarea>
+            <button class="btn btn-cream btn-block" @onclick="Submit">Отправить заявку <svg class="arrow-ico" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></svg></button>
+            @if (!string.IsNullOrEmpty(message))
+            {
+                <p class="@(success ? "success" : "error")">@message</p>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    List<ShopService> services = new();
+    bool loading = true, success;
+    string? message;
+    string instrumentType = "", instrumentModel = "", fault = "";
+    int serviceId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Сервисный центр и создание заявок доступны только покупателям.
+        if (Auth.IsLoggedIn && Auth.Role != "Покупатель")
+        {
+            Nav.NavigateTo(EmployeeHome());
+            return;
+        }
+
+        try
+        {
+            services = await Api.Services();
+            if (services.Count > 0) serviceId = services[0].id;
+        }
+        catch (Exception e)
+        {
+            message = e.Message;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    string EmployeeHome() => Auth.Role switch
+    {
+        "Администратор" => "/manage/employees",
+        "Менеджер" => "/manage/orders",
+        "Мастер" => "/repairs",
+        _ => "/profile"
+    };
+
+    async Task Submit()
+    {
+        message = null;
+        if (!Auth.IsLoggedIn)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        if (serviceId == 0 || string.IsNullOrWhiteSpace(instrumentType) || string.IsNullOrWhiteSpace(instrumentModel) || string.IsNullOrWhiteSpace(fault))
+        {
+            message = "Заполните все поля заявки.";
+            return;
+        }
+
+        try
+        {
+            await Api.CreateRepair(new(null, serviceId, instrumentType, instrumentModel, fault));
+            success = true;
+            message = "Заявка отправлена. Следить за ней можно в личном кабинете.";
+            instrumentType = instrumentModel = fault = "";
+        }
+        catch (Exception e)
+        {
+            success = false;
+            message = e.Message;
+        }
+    }
+}

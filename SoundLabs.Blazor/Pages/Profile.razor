@@ -1,0 +1,97 @@
+@page "/profile"
+@inject SoundLabsApi Api
+@inject AuthStore Auth
+@inject NavigationManager Nav
+<PageTitle>Мой профиль — SoundLabs</PageTitle>
+
+<div class="shell page-wrap">
+    <div class="breadcrumbs"><a href="/">Главная</a> / Личный кабинет / Профиль</div>
+    <h1>Мой профиль</h1>
+
+    @if (!Auth.IsLoggedIn)
+    {
+        <div class="empty-state">
+            <h2>Войдите в аккаунт</h2>
+            <p>Для просмотра профиля необходимо авторизоваться.</p>
+            <a class="btn btn-cream" href="/login">Войти</a>
+        </div>
+    }
+    else if (loading)
+    {
+        <div class="loader">Загружаем профиль…</div>
+    }
+    else if (profile is not null)
+    {
+        <div class="repair-form">
+            <div>
+                <span class="sec-kicker">Личный кабинет</span>
+                <h2>@profile.FullName</h2>
+                <p>Роль: @profile.Role</p>
+                @if (!string.IsNullOrWhiteSpace(profile.JobTitle))
+                {
+                    <p>Должность: @profile.JobTitle</p>
+                }
+                <p>Логин: <b>@profile.Login</b></p>
+            </div>
+            <div>
+                <label>ФИО</label>
+                <input @bind="fullName" />
+                <label>Телефон</label>
+                <input @bind="phone" />
+                <label>Электронная почта</label>
+                <input type="email" @bind="email" />
+                <button class="btn btn-cream btn-block" @onclick="Save" disabled="@saving">Сохранить изменения</button>
+                @if (!string.IsNullOrWhiteSpace(message))
+                {
+                    <p class="@(success ? "success" : "error")">@message</p>
+                }
+            </div>
+        </div>
+    }
+    else if (!string.IsNullOrWhiteSpace(message))
+    {
+        <p class="error">@message</p>
+    }
+</div>
+
+@code {
+    ProfileDto? profile;
+    string fullName = "", phone = "", email = "";
+    string? message;
+    bool loading = true, saving, success;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsLoggedIn) { loading = false; return; }
+        try
+        {
+            profile = await Api.Profile();
+            fullName = profile.FullName;
+            phone = profile.Phone;
+            email = profile.Email;
+        }
+        catch (Exception ex) { message = ex.Message; }
+        finally { loading = false; }
+    }
+
+    async Task Save()
+    {
+        message = null;
+        if (string.IsNullOrWhiteSpace(fullName) || string.IsNullOrWhiteSpace(phone) || string.IsNullOrWhiteSpace(email))
+        {
+            message = "Заполните все поля.";
+            success = false;
+            return;
+        }
+        saving = true;
+        try
+        {
+            await Api.SaveProfile(new(fullName.Trim(), phone.Trim(), email.Trim()));
+            profile = await Api.Profile();
+            message = "Изменения сохранены.";
+            success = true;
+        }
+        catch (Exception ex) { message = ex.Message; success = false; }
+        finally { saving = false; }
+    }
+}

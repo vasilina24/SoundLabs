@@ -1,0 +1,82 @@
+@page "/register"
+@inject SoundLabsApi Api
+@inject AuthStore Auth
+@inject NavigationManager Nav
+<PageTitle>Регистрация — SoundLabs</PageTitle>
+
+<div class="shell auth-page">
+    <div class="auth-card wide">
+        <div class="auth-art">
+            <p>Станьте частью SoundLabs</p>
+            <img src="images/placeholder.png" alt="Электрогитара" />
+        </div>
+        <div class="auth-form">
+            <h1>Создать аккаунт</h1>
+            <EditForm Model="model" OnValidSubmit="Submit">
+                <DataAnnotationsValidator />
+                <label>ФИО</label>
+                <InputText @bind-Value="model.FullName" />
+                <label>Телефон (11 цифр)</label>
+                <InputText @bind-Value="model.Phone" />
+                <label>Email</label>
+                <InputText @bind-Value="model.Email" />
+                <label>Логин</label>
+                <InputText @bind-Value="model.Login" />
+                <label>Пароль (от 6 символов)</label>
+                <InputText type="password" @bind-Value="model.Password" />
+                <ValidationSummary />
+                <button class="btn btn-cream btn-block" disabled="@busy">Зарегистрироваться <svg class="arrow-ico" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></svg></button>
+            </EditForm>
+            @if (!string.IsNullOrEmpty(error))
+            {
+                <p class="error">@error</p>
+            }
+            <p class="auth-bottom">Уже есть аккаунт? <a href="/login">Войти</a></p>
+        </div>
+    </div>
+</div>
+
+@code {
+    RegisterModel model = new();
+    bool busy;
+    string? error;
+
+    async Task Submit()
+    {
+        busy = true;
+        error = null;
+        try
+        {
+            await Auth.SetAsync(await Api.Register(new(model.Login, model.Password, model.FullName, model.Phone, model.Email)));
+            Nav.NavigateTo("/");
+        }
+        catch (Exception e)
+        {
+            error = e.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    class RegisterModel
+    {
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Введите ФИО")]
+        public string FullName { get; set; } = "";
+
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Введите телефон")]
+        public string Phone { get; set; } = "";
+
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Введите email")]
+        [System.ComponentModel.DataAnnotations.EmailAddress(ErrorMessage = "Некорректный email")]
+        public string Email { get; set; } = "";
+
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Введите логин")]
+        public string Login { get; set; } = "";
+
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Введите пароль")]
+        [System.ComponentModel.DataAnnotations.MinLength(6, ErrorMessage = "Пароль — от 6 символов")]
+        public string Password { get; set; } = "";
+    }
+}

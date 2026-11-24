@@ -1,0 +1,74 @@
+@page "/login"
+@inject SoundLabsApi Api
+@inject AuthStore Auth
+@inject NavigationManager Nav
+<PageTitle>Вход — SoundLabs</PageTitle>
+
+<div class="shell auth-page">
+    <div class="auth-card">
+        <div class="auth-art">
+            <p>Снова рады вас видеть</p>
+            <img src="images/placeholder.png" alt="Электрогитара" />
+        </div>
+        <div class="auth-form">
+            <h1>Вход в аккаунт</h1>
+            <p class="muted">Войдите, чтобы управлять заказами и заявками на ремонт.</p>
+            <EditForm Model="model" OnValidSubmit="Submit">
+                <DataAnnotationsValidator />
+                <label>Логин</label>
+                <InputText @bind-Value="model.Login" placeholder="Ваш логин" />
+                <label>Пароль</label>
+                <InputText type="password" @bind-Value="model.Password" placeholder="Пароль" />
+                <ValidationSummary />
+                <button class="btn btn-cream btn-block" disabled="@busy">Войти <svg class="arrow-ico" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></svg></button>
+            </EditForm>
+            @if (!string.IsNullOrEmpty(error))
+            {
+                <p class="error">@error</p>
+            }
+            <p class="auth-bottom">Нет аккаунта? <a href="/register">Зарегистрироваться</a></p>
+        </div>
+    </div>
+</div>
+
+@code {
+    LoginModel model = new();
+    bool busy;
+    string? error;
+
+    async Task Submit()
+    {
+        busy = true;
+        error = null;
+        try
+        {
+            var auth = await Api.Login(model.Login, model.Password);
+            await Auth.SetAsync(auth);
+            var destination = auth.Role switch
+            {
+                "Администратор" => "/manage/employees",
+                "Менеджер" => "/manage/orders",
+                "Мастер" => "/repairs",
+                _ => "/"
+            };
+            Nav.NavigateTo(destination);
+        }
+        catch (Exception e)
+        {
+            error = e.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    class LoginModel
+    {
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Введите логин")]
+        public string Login { get; set; } = "";
+
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Введите пароль")]
+        public string Password { get; set; } = "";
+    }
+}

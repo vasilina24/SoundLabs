@@ -1,0 +1,198 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject AuthStore Auth
+@inject CartState CartStore
+@inject NavigationManager Nav
+
+<header class="site-header">
+    <div class="shell header-main">
+        <a class="logo" href="/" @onclick="CloseMenu">
+            <span class="logo-mark"><span>S</span></span>
+            <span class="logo-text">SoundLabs<small>музыкальный магазин</small></span>
+        </a>
+
+        <div class="menu-panel @(menuOpen ? "open" : "")">
+            <nav class="main-nav">
+
+                @if (!Auth.IsLoggedIn || Auth.Role == "Покупатель")
+                {
+                <NavLink class="nav-link" href="/catalog" @onclick="CloseMenu">
+                    Каталог
+                </NavLink>
+
+                <NavLink class="nav-link" href="/services" @onclick="CloseMenu">
+                    Сервис
+                </NavLink>
+                }
+
+                @if (Auth.Role == "Покупатель")
+                {
+                <NavLink class="nav-link" href="/orders" @onclick="CloseMenu">
+                    Мои заказы
+                </NavLink>
+
+                <NavLink class="nav-link" href="/repairs" @onclick="CloseMenu">
+                    Мои ремонты
+                </NavLink>
+                }
+
+                @if (Auth.Role == "Администратор")
+                {
+                <NavLink class="nav-link" href="/manage/employees" @onclick="CloseMenu">Сотрудники</NavLink>
+                <NavLink class="nav-link" href="/manage/admin" @onclick="CloseMenu">Настройки и журналы</NavLink>
+                }
+
+                @if (Auth.Role == "Менеджер")
+                {
+                <NavLink class="nav-link" href="/manage/products" @onclick="CloseMenu">
+                    Управление товарами
+                </NavLink>
+                <NavLink class="nav-link" href="/manage/orders" @onclick="CloseMenu">
+                    Заказы покупателей
+                </NavLink>
+                <NavLink class="nav-link" href="/manage/repairs" @onclick="CloseMenu">Заявки на ремонт</NavLink>
+                <NavLink class="nav-link" href="/manage/inventory" @onclick="CloseMenu">Склад и поставщики</NavLink>
+                }
+
+                @if (Auth.Role == "Мастер")
+                {
+                <NavLink class="nav-link" href="/repairs" @onclick="CloseMenu">
+                    Заявки на ремонт
+                </NavLink>
+                }
+
+            </nav>
+
+            @if (!IsEmployee)
+            {
+                <form class="header-search" @onsubmit="Search" @onsubmit:preventDefault>
+                    <input @bind="query" @bind:event="oninput" placeholder="Найти инструмент или бренд" aria-label="Поиск по каталогу" />
+                    <button type="submit" aria-label="Искать">
+                        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4.5 4.5" /></svg>
+                    </button>
+                </form>
+            }
+        </div>
+
+        <div class="header-actions">
+            @if (!Auth.IsLoggedIn || Auth.Role == "Покупатель")
+            {
+                <a class="CartStore-link" href="/cart" aria-label="Корзина">
+                    <svg viewBox="0 0 24 24"><path d="M3 4h2.2l2.1 10.2a1.6 1.6 0 0 0 1.6 1.3h7.9a1.6 1.6 0 0 0 1.6-1.2L20 8H6.2" /><circle cx="9.5" cy="19.2" r="1.2" /><circle cx="16.5" cy="19.2" r="1.2" /></svg>
+                    <span>Корзина</span>
+                    <b class="CartStore-count" @key="CartStore.Count">@CartStore.Count</b>
+                </a>
+            }
+            @if (Auth.IsLoggedIn)
+            {
+                <a class="login-link" href="/profile">Профиль</a>
+                <button class="login-link" @onclick="Logout">Выйти</button>
+            }
+            else
+            {
+                <a class="login-link" href="/login">Войти</a>
+            }
+        </div>
+
+        <button class="burger @(menuOpen ? "open" : "")" @onclick="ToggleMenu" aria-label="Меню"><i></i><i></i><i></i></button>
+    </div>
+</header>
+
+<main class="page" @key="Path">@Body</main>
+
+<footer class="footer">
+    <div class="shell">
+        <div class="footer-grid">
+            <div>
+                <a class="logo" href="/">
+                    <span class="logo-mark"><span>S</span></span>
+                    <span class="logo-text">SoundLabs<small>музыкальный магазин</small></span>
+                </a>
+                <p>Инструменты для тех, кто создаёт музыку.</p>
+            </div>
+            <div>
+                @if (IsEmployee)
+                {
+                    <b>Сотрудникам</b>
+                    @if (Auth.Role == "Администратор")
+                    {
+                        <a href="/manage/employees">Сотрудники</a>
+                        <a href="/manage/admin">Настройки системы и журналы</a>
+                    }
+                    else if (Auth.Role == "Менеджер")
+                    {
+                        <a href="/manage/products">Управление товарами</a>
+                        <a href="/manage/orders">Заказы покупателей</a>
+                        <a href="/manage/repairs">Заявки на ремонт</a>
+                        <a href="/manage/inventory">Склад и поставщики</a>
+                    }
+                    else if (Auth.Role == "Мастер")
+                    {
+                        <a href="/repairs">Назначенные ремонты</a>
+                    }
+                    <a href="/profile">Мой профиль</a>
+                }
+                else
+                {
+                    <b>Покупателям</b>
+                    <a href="/catalog">Каталог</a>
+                    <a href="/orders">Мои заказы</a>
+                    <a href="/services">Сервисный центр</a>
+                    @if (Auth.IsLoggedIn) { <a href="/profile">Мой профиль</a> }
+                }
+            </div>
+            <div>
+                <b>SoundLabs</b>
+                <span>О магазине</span>
+                <span>Контакты</span>
+                <span>Гарантия и доставка</span>
+            </div>
+            <div>
+                <b>На связи</b>
+                <strong>8 800 555-35-35</strong>
+                <span>Ежедневно 10:00–20:00</span>
+            </div>
+        </div>
+        <div class="copyright">© 2026 SoundLabs. Все права защищены.</div>
+    </div>
+</footer>
+
+@code {
+    bool menuOpen;
+    string query = "";
+
+    string Path => new Uri(Nav.Uri).AbsolutePath;
+    bool IsEmployee => Auth.IsLoggedIn && Auth.Role != "Покупатель";
+
+    protected override async Task OnInitializedAsync()
+    {
+        Auth.Changed += Refresh;
+        CartStore.Changed += Refresh;
+        await Auth.InitializeAsync();
+    }
+
+    void Refresh() => InvokeAsync(StateHasChanged);
+
+    void ToggleMenu() => menuOpen = !menuOpen;
+
+    void CloseMenu() => menuOpen = false;
+
+    void Search()
+    {
+        var text = query.Trim();
+        Nav.NavigateTo(text.Length == 0 ? "/catalog" : "/catalog?search=" + Uri.EscapeDataString(text));
+        menuOpen = false;
+    }
+
+    async Task Logout()
+    {
+        await Auth.LogoutAsync();
+        Nav.NavigateTo("/");
+    }
+
+    public void Dispose()
+    {
+        Auth.Changed -= Refresh;
+        CartStore.Changed -= Refresh;
+    }
+}

@@ -1,0 +1,150 @@
+@page "/manage/employees"
+@inject SoundLabsApi Api
+@inject AuthStore Auth
+@inject NavigationManager Nav
+<PageTitle>Сотрудники — SoundLabs</PageTitle>
+
+<div class="shell page-wrap">
+    <div class="breadcrumbs"><a href="/">Главная</a> / Администрирование / Сотрудники</div>
+    <h1>Управление сотрудниками</h1>
+    @if (Auth.Role != "Администратор")
+    {
+        <div class="empty-state"><h2>Нет доступа</h2><p>Раздел доступен только администратору.</p></div>
+    }
+    else
+    {
+        <div class="admin-form">
+            <h3>@(editId is null ? "Добавить сотрудника" : "Редактировать сотрудника")</h3>
+            <div class="form-grid">
+                <div><label>ФИО</label><input @bind="form.FullName" /></div>
+                <div><label>Телефон (11 цифр)</label><input @bind="form.Phone" maxlength="11" /></div>
+                <div><label>Электронная почта</label><input type="email" @bind="form.Email" /></div>
+                <div><label>Логин</label><input @bind="form.Login" /></div>
+                <div><label>Пароль @(editId is null ? "" : "(оставьте пустым, чтобы не менять)")</label><input type="password" @bind="form.Password" /></div>
+                <div>
+                    <label>Роль</label>
+                    <select @bind="form.Role"><option value="Менеджер">Менеджер</option><option value="Мастер">Мастер</option></select>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-cream" @onclick="Save" disabled="@saving">@(saving ? "Сохранение…" : editId is null ? "Добавить сотрудника" : "Сохранить изменения")</button>
+                @if (editId is not null) { <button class="btn btn-ghost" @onclick="Reset">Отмена</button> }
+            </div>
+            @if (!string.IsNullOrWhiteSpace(message)) { <p class="@(success ? "success" : "error")">@message</p> }
+        </div>
+
+        @if (loading)
+        {
+            <div class="loader">Загружаем список сотрудников…</div>
+        }
+        else if (employees.Count == 0)
+        {
+            <div class="empty-state"><h2>Сотрудников пока нет</h2><p>Добавьте менеджера или мастера.</p></div>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>ФИО</th><th>Логин</th><th>Контакты</th><th>Роль</th><th>Дата приёма</th><th>Состояние</th><th>Действия</th></tr></thead>
+                    <tbody>
+                        @foreach (var e in employees)
+                        {
+                            <tr @key="e.Id">
+                                <td>@e.FullName</td><td>@e.Login</td><td>@e.Phone<br />@e.Email</td><td>@e.Role</td>
+                                <td>@e.HireDate.ToString("dd.MM.yyyy")</td><td><span class="status">@(e.IsActive ? "Активен" : "Отключён")</span></td>
+                                <td>
+                                    <button class="mini-btn" @onclick="() => Edit(e)" disabled="@(!e.IsActive)">Изменить</button>
+                                    @if (e.IsActive)
+                                    {
+                                        @if (confirmDeactivateId == e.Id)
+                                        {
+                                            <small>Отключить учётную запись?</small>
+                                            <button class="mini-btn" @onclick="() => Deactivate(e)" disabled="@saving">Да, отключить</button>
+                                            <button class="mini-btn" @onclick="CancelDeactivate">Отмена</button>
+                                        }
+                                        else
+                                        {
+                                            <button class="mini-btn" @onclick="() => AskDeactivate(e.Id)" disabled="@saving">Отключить</button>
+                                        }
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    List<Employee> employees = new();
+    EmployeeForm form = new();
+    int? editId;
+    int? confirmDeactivateId;
+    bool loading = true, saving, success;
+    string? message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Auth.Role != "Администратор") { loading = false; return; }
+        await Load();
+    }
+
+    async Task Load()
+    {
+        loading = true;
+        try { employees = await Api.Employees(); message = null; }
+        catch (Exception ex) { success = false; message = ex.Message; }
+        finally { loading = false; }
+    }
+
+    async Task Save()
+    {
+        if (saving) return;
+        if (string.IsNullOrWhiteSpace(form.FullName) || string.IsNullOrWhiteSpace(form.Login) || string.IsNullOrWhiteSpace(form.Email) || string.IsNullOrWhiteSpace(form.Phone))
+        { success = false; message = "Заполните ФИО, телефон, email и логин."; return; }
+        if (form.Phone.Length != 11 || !form.Phone.All(char.IsDigit))
+        { success = false; message = "Телефон должен содержать 11 цифр."; return; }
+        if (editId is null && string.IsNullOrWhiteSpace(form.Password) || editId is null && form.Password.Length < 6)
+        { success = false; message = "Пароль должен содержать не менее 6 символов."; return; }
+        saving = true; message = null;
+        try
+        {
+            await Api.SaveEmployee(new EmployeeSave(form.Login.Trim(), string.IsNullOrWhiteSpace(form.Password) ? null : form.Password, form.FullName.Trim(), form.Phone.Trim(), form.Email.Trim(), form.Role), editId);
+            await Load(); Reset(); success = true; message = "Данные сотрудника сохранены.";
+        }
+        catch (Exception ex) { success = false; message = ex.Message; }
+        finally { saving = false; }
+    }
+
+    void Edit(Employee e)
+    {
+        editId = e.Id;
+        form = new EmployeeForm { Login = e.Login, FullName = e.FullName, Phone = e.Phone.Trim(), Email = e.Email, Role = e.Role };
+        message = null;
+    }
+
+    void AskDeactivate(int id) => confirmDeactivateId = id;
+    void CancelDeactivate() => confirmDeactivateId = null;
+
+    async Task Deactivate(Employee e)
+    {
+        saving = true; message = null;
+        try { await Api.DeactivateEmployee(e.Id); confirmDeactivateId = null; await Load(); success = true; message = $"Учётная запись сотрудника {e.FullName} отключена."; }
+        catch (Exception ex) { success = false; message = ex.Message; }
+        finally { saving = false; }
+    }
+
+    void Reset() { editId = null; form = new EmployeeForm(); }
+
+    class EmployeeForm
+    {
+        public string Login { get; set; } = "";
+        public string Password { get; set; } = "";
+        public string FullName { get; set; } = "";
+        public string Phone { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string Role { get; set; } = "Менеджер";
+    }
+}

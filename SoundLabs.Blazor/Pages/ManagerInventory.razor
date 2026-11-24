@@ -1,0 +1,45 @@
+@page "/manage/inventory"
+@inject SoundLabsApi Api
+@inject AuthStore Auth
+<PageTitle>Склад и поставщики — SoundLabs</PageTitle>
+<div class="shell page-wrap">
+ <div class="breadcrumbs"><a href="/">Главная</a> / Управление / Склад и поставщики</div><h1>Склад и поставщики</h1>
+ @if (Auth.Role != "Менеджер") { <div class="empty-state"><h2>Нет доступа</h2></div> }
+ else {
+  <div class="form-actions"><button class="mini-btn" @onclick='() => tab = "parts"'>Склад запчастей</button><button class="mini-btn" @onclick='() => tab = "suppliers"'>Поставщики</button><button class="mini-btn" @onclick='() => tab = "orders"'>Заказы поставщикам</button></div>
+  @if (!string.IsNullOrWhiteSpace(message)) { <p class="@(failed ? "error" : "success")">@message</p> }
+  @if (tab == "parts") {
+   <h2>@(partId == null ? "Добавить запчасть" : "Изменить запчасть")</h2>
+   <div class="admin-form"><div class="form-grid"><div><label>Артикул</label><input @bind="part.Article" /></div><div><label>Название</label><input @bind="part.Name" /></div><div><label>Цена</label><input type="number" min="0" step="0.01" @bind="part.Price" /></div><div><label>Остаток</label><input type="number" min="0" @bind="part.StockQuantity" /></div><div><label>Минимальный остаток</label><input type="number" min="0" @bind="part.MinQuantity" /></div></div><div class="form-actions"><button class="btn btn-cream" @onclick="SavePart">Сохранить запчасть</button><button class="btn btn-ghost" @onclick="ResetPart">Очистить</button></div></div>
+   <div class="table-wrap"><table><thead><tr><th>Артикул</th><th>Запчасть</th><th>Цена</th><th>Остаток</th><th>Минимум</th><th></th></tr></thead><tbody>@foreach (var x in parts) { <tr><td>@x.Article</td><td>@x.Name</td><td>@x.Price.ToString("N2") ₽</td><td><span class="status">@x.Stock</span></td><td>@x.Minimum</td><td><button class="mini-btn" @onclick="() => EditPart(x)">Изменить</button></td></tr> }</tbody></table></div>
+  }
+  else if (tab == "suppliers") {
+   <h2>@(supplierId == null ? "Добавить поставщика" : "Изменить поставщика")</h2><div class="admin-form"><div class="form-grid"><div><label>Название</label><input @bind="supplier.Name" /></div><div><label>Контактное лицо</label><input @bind="supplier.ContactPerson" /></div><div><label>Телефон (11 цифр)</label><input @bind="supplier.Phone" maxlength="11" /></div><div><label>Email</label><input @bind="supplier.Email" /></div><div><label>Адрес</label><input @bind="supplier.Address" /></div></div><div class="form-actions"><button class="btn btn-cream" @onclick="SaveSupplier">Сохранить поставщика</button><button class="btn btn-ghost" @onclick="ResetSupplier">Очистить</button></div></div>
+   <div class="table-wrap"><table><thead><tr><th>Поставщик</th><th>Контакт</th><th>Телефон</th><th>Email</th><th>Адрес</th><th></th></tr></thead><tbody>@foreach (var x in suppliers) { <tr><td>@x.Name</td><td>@x.Contact</td><td>@x.Phone</td><td>@x.Email</td><td>@x.Address</td><td><button class="mini-btn" @onclick="() => EditSupplier(x)">Изменить</button><button class="mini-btn" @onclick="() => DeleteSupplier(x)">Удалить</button></td></tr> }</tbody></table></div>
+  }
+  else {
+   <h2>Оформить заказ поставщику</h2><div class="admin-form"><div class="form-grid"><div><label>Поставщик</label><select @bind="purchase.SupplierId"><option value="0">Выберите</option>@foreach (var s in suppliers) { <option value="@s.Id">@s.Name</option> }</select></div><div><label>Запчасть</label><select @bind="purchase.PartId"><option value="0">Выберите</option>@foreach (var p in parts) { <option value="@p.Id">@p.Name (@p.Article)</option> }</select></div><div><label>Количество</label><input type="number" min="1" @bind="purchase.Quantity" /></div><div><label>Цена за единицу</label><input type="number" min="0" step="0.01" @bind="purchase.UnitPrice" /></div></div><button class="btn btn-cream" @onclick="CreatePurchase">Создать заказ поставщику</button></div>
+   <h2>История заказов поставщикам</h2><div class="table-wrap"><table><thead><tr><th>№</th><th>Поставщик</th><th>Дата</th><th>Статус</th><th>Сумма</th><th>Приёмка</th></tr></thead><tbody>@foreach (var o in purchases) { <tr><td>@o.Id</td><td>@o.Supplier</td><td>@o.Date.ToString("dd.MM.yyyy")</td><td>@o.Status</td><td>@o.Total.ToString("N2") ₽</td><td>@foreach (var i in o.Items) { <div>@i.PartName: @i.Received/@i.Quantity @if (i.PartId.HasValue && i.Received < i.Quantity) { <button class="mini-btn" @onclick="() => Receive(o.Id, i.PartId.Value, i.Quantity-i.Received)">Принять остаток</button> }</div> }</td></tr> }</tbody></table></div>
+  }
+ }
+</div>
+@code {
+ string tab="parts"; string? message; bool failed; int? partId, supplierId;
+ List<SparePartView> parts=new(); List<SupplierView> suppliers=new(); List<SupplierPurchaseView> purchases=new();
+ PartForm part=new(); SupplierForm supplier=new(); PurchaseForm purchase=new();
+ protected override async Task OnInitializedAsync(){ if(Auth.Role=="Менеджер") await Load(); }
+ async Task Load(){ try { parts=await Api.SpareParts(); suppliers=await Api.Suppliers(); purchases=await Api.SupplierPurchases(); } catch(Exception e){ failed=true; message=e.Message; } }
+ async Task SavePart(){ try { await Api.SaveSparePart(new(part.Article,part.Name,part.Price,part.StockQuantity,part.MinQuantity),partId); ResetPart(); await Load(); Ok("Запчасть сохранена."); } catch(Exception e){ Fail(e); } }
+ void EditPart(SparePartView x){partId=x.Id;part=new(){Article=x.Article,Name=x.Name,Price=x.Price,StockQuantity=x.Stock,MinQuantity=x.Minimum};}
+ void ResetPart(){partId=null;part=new();}
+ async Task SaveSupplier(){ try { await Api.SaveSupplier(new(supplier.Name,supplier.ContactPerson,supplier.Phone,supplier.Email,supplier.Address),supplierId); ResetSupplier(); await Load(); Ok("Поставщик сохранён."); } catch(Exception e){Fail(e);} }
+ void EditSupplier(SupplierView x){supplierId=x.Id;supplier=new(){Name=x.Name,ContactPerson=x.Contact,Phone=x.Phone,Email=x.Email,Address=x.Address??""};}
+ void ResetSupplier(){supplierId=null;supplier=new();}
+ async Task DeleteSupplier(SupplierView x){try{await Api.DeleteSupplier(x.Id);await Load();Ok("Поставщик удалён.");}catch(Exception e){Fail(e);}}
+ async Task CreatePurchase(){try{if(purchase.SupplierId<=0||purchase.PartId<=0||purchase.Quantity<=0)throw new Exception("Выберите поставщика, запчасть и количество.");await Api.CreateSupplierPurchase(new(purchase.SupplierId,new(){new(purchase.PartId,purchase.Quantity,purchase.UnitPrice)}));purchase=new();await Load();Ok("Заказ поставщику оформлен.");}catch(Exception e){Fail(e);}}
+ async Task Receive(int orderId,int partId,int quantity){try{await Api.ReceiveSupplierPart(orderId,partId,quantity);await Load();Ok("Поставка принята, остаток склада обновлён.");}catch(Exception e){Fail(e);}}
+ void Ok(string s){failed=false;message=s;} void Fail(Exception e){failed=true;message=e.Message;}
+ class PartForm{public string Article{get;set;}="";public string Name{get;set;}="";public decimal Price{get;set;} public int StockQuantity{get;set;} public int MinQuantity{get;set;}}
+ class SupplierForm{public string Name{get;set;}="";public string ContactPerson{get;set;}="";public string Phone{get;set;}="";public string Email{get;set;}="";public string Address{get;set;}="";}
+ class PurchaseForm{public int SupplierId{get;set;} public int PartId{get;set;} public int Quantity{get;set;}=1; public decimal UnitPrice{get;set;}}
+}

@@ -1,0 +1,128 @@
+@page "/cart"
+@inject CartState CartStore
+@inject SoundLabsApi Api
+@inject AuthStore Auth
+@inject NavigationManager Nav
+@implements IDisposable
+<PageTitle>Корзина — SoundLabs</PageTitle>
+
+<div class="shell page-wrap">
+    <div class="breadcrumbs"><a href="/">Главная</a> / Корзина</div>
+    <h1>Ваша корзина</h1>
+
+    @if (CartStore.Items.Count == 0)
+    {
+        <div class="empty-state">
+            <h2>Корзина пока пуста</h2>
+            <p>Самое время выбрать инструмент мечты.</p>
+            <a class="btn btn-cream" href="/catalog">Перейти в каталог <svg class="arrow-ico" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></svg></a>
+        </div>
+    }
+    else
+    {
+        <div class="CartStore-layout">
+            <div class="CartStore-items">
+                @foreach (var item in CartStore.Items.Values)
+                {
+                    <div class="CartStore-row" @key="item.Product.Id">
+                        <div class="CartStore-thumb"><img src="@Api.ProductImageUrl(item.Product.ImageUrl)" alt="@item.Product.Name" /></div>
+                        <div class="CartStore-desc">
+                            <b>@item.Product.Name</b>
+                            <small>Артикул @item.Product.Article</small>
+                            <div class="qty">
+                                <button @onclick="() => CartStore.SetQuantity(item.Product.Id, item.Quantity - 1)" aria-label="Меньше">−</button>
+                                <span>@item.Quantity</span>
+                                <button @onclick="() => CartStore.SetQuantity(item.Product.Id, item.Quantity + 1)" aria-label="Больше">+</button>
+                            </div>
+                        </div>
+                        <strong>@((item.Product.Price * item.Quantity).ToString("N0")) ₽</strong>
+                        <button class="remove" @onclick="() => CartStore.SetQuantity(item.Product.Id, 0)" aria-label="Удалить">×</button>
+                    </div>
+                }
+            </div>
+
+            <aside class="CartStore-summary">
+                <h3>Ваш заказ</h3>
+                <div class="summary-line"><span>Товары (@CartStore.Count)</span><b>@CartStore.Total.ToString("N0") ₽</b></div>
+                <div class="summary-line total"><span>Итого</span><b>@CartStore.Total.ToString("N0") ₽</b></div>
+                <label>Способ получения</label>
+                <select @bind="method">
+                    <option>Самовывоз</option>
+                    <option>Доставка</option>
+                </select>
+
+                @if (method == "Доставка")
+                {
+                <label>Улица</label>
+                <input type="text"
+                       @bind="street"
+                       placeholder="Например, Ленина"
+                       maxlength="150" />
+
+                <label>Дом</label>
+                <input type="text"
+                       @bind="house"
+                       placeholder="Например, 15"
+                       maxlength="30" />
+
+                <label>Квартира</label>
+                <input type="text"
+                       @bind="apartment"
+                       placeholder="Например, 24"
+                       maxlength="30" />
+                }
+                <button class="btn btn-cream btn-block" @onclick="Checkout" disabled="@busy">Оформить заказ</button>
+                @if (!string.IsNullOrEmpty(error))
+                {
+                    <p class="error">@error</p>
+                }
+                <small class="muted">Оформляя заказ, вы подтверждаете выбранный способ получения.</small>
+            </aside>
+        </div>
+    }
+</div>
+
+@code {
+    string method = "Самовывоз";
+    string street = "";
+    string house = "";
+    string apartment = "";
+    bool busy;
+    string? error;
+
+    protected override void OnInitialized() => CartStore.Changed += Refresh;
+
+    void Refresh() => InvokeAsync(StateHasChanged);
+
+    async Task Checkout()
+    {
+        error = null;
+
+        if (method == "Доставка")
+        {
+            if (string.IsNullOrWhiteSpace(street) ||
+                string.IsNullOrWhiteSpace(house) ||
+                string.IsNullOrWhiteSpace(apartment))
+            {
+                error = "Заполните улицу, дом и квартиру";
+                return;
+            }
+        }
+
+        busy = true;
+
+        busy = true;
+        error = null;
+
+        string? address = method == "Доставка" ? $"ул. {street.Trim()}, д. {house.Trim()}, кв. {apartment.Trim()}" : null;
+
+        await Api.CreateOrder(new(
+            method,
+            address,
+            CartStore.Items.Values.Select(x =>
+                new OrderItemIn(x.Product.Id, x.Quantity)).ToList()
+        ));
+    }
+
+    public void Dispose() => CartStore.Changed -= Refresh;
+}

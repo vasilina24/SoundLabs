@@ -1,0 +1,35 @@
+@page "/manage/admin"
+@inject SoundLabsApi Api
+@inject AuthStore Auth
+@inject IJSRuntime JS
+<PageTitle>Администрирование — SoundLabs</PageTitle>
+<div class="shell page-wrap">
+    <div class="breadcrumbs"><a href="/">Главная</a> / Администрирование</div>
+    <h1>Панель администратора</h1>
+    @if (Auth.Role != "Администратор") { <div class="empty-state"><h2>Нет доступа</h2></div> }
+    else {
+        <div class="form-actions"><button class="mini-btn" @onclick='() => tab = "settings"'>Настройки системы</button><button class="mini-btn" @onclick='() => tab = "logs"'>Системные журналы</button><button class="mini-btn" @onclick="Backup" disabled="@busy">Создать резервную копию</button></div>
+        @if (!string.IsNullOrWhiteSpace(message)) { <p class="@(failed ? "error" : "success")">@message</p> }
+        @if (tab == "settings") {
+            <h2>Настройки системы</h2>
+            @foreach (var x in settings) { <div class="admin-form"><b>@x.Name</b><p>@x.Description</p><div class="form-grid"><input @bind="x.Value" /><button class="mini-btn" @onclick="() => SaveSetting(x)">Сохранить</button></div></div> }
+            <h3>Добавить параметр системы</h3>
+            <div class="admin-form"><div class="form-grid"><div><label>Название параметра</label><input @bind="newName" /></div><div><label>Значение</label><input @bind="newValue" /></div><div><label>Описание</label><input @bind="newDescription" /></div></div><button class="btn btn-cream" @onclick="CreateSetting">Добавить параметр</button></div>
+        }
+        else {
+            <h2>Системные журналы</h2>
+            <div class="table-wrap"><table><thead><tr><th>Дата</th><th>Пользователь</th><th>Событие</th><th>Описание</th></tr></thead><tbody>
+            @foreach (var x in logs) { <tr><td>@x.Date.ToString("dd.MM.yyyy HH:mm:ss")</td><td>@x.Login</td><td>@x.Type</td><td>@x.Description</td></tr> }
+            </tbody></table></div>
+        }
+    }
+</div>
+@code {
+    string tab = "settings"; bool busy, failed; string? message; string newName = "", newValue = "", newDescription = "";
+    List<SystemSettingView> settings = new(); List<AdminLog> logs = new();
+    protected override async Task OnInitializedAsync() { if (Auth.Role == "Администратор") await Load(); }
+    async Task Load() { try { settings = await Api.AdminSettings(); logs = await Api.AdminLogs(); } catch (Exception e) { failed = true; message = e.Message; } }
+    async Task SaveSetting(SystemSettingView x) { try { await Api.UpdateAdminSetting(x.Id, x.Value); failed = false; message = $"Параметр {x.Name} сохранён."; } catch (Exception e) { failed = true; message = e.Message; } }
+    async Task CreateSetting() { try { await Api.CreateAdminSetting(newName, newValue, newDescription); newName = newValue = newDescription = ""; await Load(); failed = false; message = "Параметр добавлен."; } catch (Exception e) { failed = true; message = e.Message; } }
+    async Task Backup() { busy = true; message = null; try { var bytes = await Api.AdminBackup(); await JS.InvokeVoidAsync("soundlabsDownload", "SoundLabs_backup_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".sql", "application/sql", Convert.ToBase64String(bytes)); failed = false; message = "Резервная копия базы данных скачана."; } catch (Exception e) { failed = true; message = e.Message; } finally { busy = false; } }
+}

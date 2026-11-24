@@ -1,0 +1,230 @@
+@page "/orders"
+@page "/manage/orders"
+@implements IDisposable
+@inject SoundLabsApi Api
+@inject AuthStore Auth
+@inject NavigationManager Nav
+<PageTitle>@(Auth.Role == "Менеджер" ? "Управление заказами — SoundLabs" : "Мои заказы — SoundLabs")</PageTitle>
+
+<div class="shell page-wrap">
+    <div class="breadcrumbs"><a href="/">Главная</a> / @(Auth.Role == "Менеджер" ? "Управление" : "Личный кабинет") / Заказы</div>
+    <h1>@(Auth.Role == "Менеджер" ? "Заказы покупателей" : "Мои заказы")</h1>
+    @if (!string.IsNullOrWhiteSpace(notice)) { <p class="success">@notice</p> }
+
+    @if (!Auth.IsLoggedIn)
+    {
+        <div class="empty-state">
+            <h2>Войдите в аккаунт</h2>
+            <p>Заказы доступны после входа.</p>
+            <a class="btn btn-cream" href="/login">Войти</a>
+        </div>
+    }
+    else if (loading)
+    {
+        <div class="loader"><div class="eq"><i></i><i></i><i></i><i></i></div>Загружаем заказы…</div>
+    }
+    else if (!string.IsNullOrEmpty(error))
+    {
+        <p class="error">@error</p>
+    }
+    else if (orders.Count == 0)
+    {
+        <div class="empty-state">
+            <h2>Заказов пока нет</h2>
+            <p>@(Auth.Role == "Менеджер" ? "Новых заказов пока нет." : "Выберите инструмент в каталоге — он появится здесь.")</p>
+            @if (Auth.Role == "Покупатель")
+            {
+                <a class="btn btn-cream" href="/catalog">Выбрать товары</a>
+            }
+        </div>
+    }
+    else
+    {
+        @if (Auth.Role == "Покупатель" && notifications.Count > 0)
+        {
+            <div class="admin-form">
+                <h3>Уведомления по заказам</h3>
+                @foreach (var n in notifications)
+                {
+                    <p><b>@n.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</b> — @n.Message</p>
+                }
+            </div>
+        }
+        @if (Auth.Role == "Покупатель")
+        {
+            <div class="form-actions"><button class="btn btn-ghost" @onclick="RefreshOrders">Обновить статусы</button><small>Статусы также обновляются автоматически.</small></div>
+        }
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Заказ</th>
+                        <th>Дата</th>
+                        <th>Состав</th>
+                        <th>Получение</th>
+                        <th>Сумма</th>
+                        <th>Статус</th>
+                        @if (Auth.Role == "Менеджер")
+                        {
+                            <th>Действие</th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var o in orders)
+                    {
+                        <tr>
+                            <td>#@o.Id</td>
+                            <td>@o.OrderDate.ToString("dd.MM.yyyy")</td>
+                            <td>@string.Join(", ", o.Items.Select(i => $"{i.ProductName} × {i.Quantity}"))</td>
+                            <td>@o.ReceiveMethod</td>
+                            <td><b>@o.TotalAmount.ToString("N0") ₽</b></td>
+                            <td>
+                                <span class="status">@o.Status</span>
+                                @if (!string.IsNullOrEmpty(o.RejectReason))
+                                {
+                                    <small>@o.RejectReason</small>
+                                }
+                            </td>
+                            @if (Auth.Role == "Менеджер")
+                            {
+                                <td>
+                                    @if (AllowedNextStatuses(o).Length > 0)
+                                    {
+                                        <select @bind="nextStatus[o.Id]">
+                                            @foreach (var status in AllowedNextStatuses(o))
+                                            {
+                                                <option value="@status">@status</option>
+                                            }
+                                        </select>
+                                        <button class="mini-btn" @onclick="() => Update(o.Id)" disabled="@saving.Contains(o.Id)">@(saving.Contains(o.Id) ? "Сохранение…" : "Сохранить")</button>
+                                    }
+                                    else
+                                    {
+                                        <small>Изменение статуса недоступно</small>
+                                    }
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    List<ShopOrder> orders = new();
+    List<OrderNotification> notifications = new();
+    Dictionary<int, string> nextStatus = new();
+    HashSet<int> saving = new();
+    bool loading = true;
+    string? error;
+    string? notice;
+    CancellationTokenSource? refreshCts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Auth.Role is "Мастер" or "Администратор")
+        {
+            Nav.NavigateTo(Auth.Role == "Мастер" ? "/repairs" : "/manage/employees", replace: true);
+            loading = false;
+            return;
+        }
+        if (!Auth.IsLoggedIn)
+        {
+            loading = false;
+            return;
+        }
+
+        try
+        {
+            await LoadOrders();
+            if (Auth.Role == "Покупатель")
+            {
+                refreshCts = new CancellationTokenSource();
+                _ = RefreshLoop(refreshCts.Token);
+            }
+        }
+        catch (Exception e)
+        {
+            error = e.Message;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    static string[] AllowedNextStatuses(ShopOrder order) => order.Status switch
+    {
+        "Новый" => ["Подтверждён", "Отклонён"],
+        "Подтверждён" when order.ReceiveMethod == "Доставка" => ["В пути", "Отклонён"],
+        "Подтверждён" => ["Готов к выдаче", "Отклонён"],
+        "В пути" => ["Доставлен"],
+        "Готов к выдаче" => ["Выполнен"],
+        _ => []
+    };
+
+    async Task LoadOrders()
+    {
+        orders = await Api.Orders();
+        foreach (var o in orders)
+        {
+            var choices = AllowedNextStatuses(o);
+            if (!nextStatus.TryGetValue(o.Id, out var selected) || !choices.Contains(selected))
+                nextStatus[o.Id] = choices.FirstOrDefault() ?? o.Status;
+        }
+        if (Auth.Role == "Покупатель")
+            notifications = await Api.OrderNotifications();
+    }
+
+    async Task RefreshOrders()
+    {
+        try
+        {
+            await LoadOrders();
+            notice = "Статусы заказов обновлены.";
+            error = null;
+        }
+        catch (Exception e) { error = e.Message; }
+    }
+
+    async Task RefreshLoop(CancellationToken token)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(12));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(token))
+            {
+                await InvokeAsync(async () =>
+                {
+                    try { await LoadOrders(); error = null; StateHasChanged(); }
+                    catch (Exception e) { error = e.Message; StateHasChanged(); }
+                });
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    async Task Update(int id)
+    {
+        if (!saving.Add(id)) return;
+        try
+        {
+            var s = nextStatus[id];
+            await Api.ChangeOrder(id, new(s, s == "Отклонён" ? "Отклонено менеджером" : null));
+            await LoadOrders();
+            notice = $"Статус заказа №{id} изменён на «{s}». Покупатель увидит обновление в личном кабинете.";
+            error = null;
+        }
+        catch (Exception e) { error = e.Message; }
+        finally { saving.Remove(id); }
+    }
+
+    public void Dispose()
+    {
+        refreshCts?.Cancel();
+        refreshCts?.Dispose();
+    }
+}

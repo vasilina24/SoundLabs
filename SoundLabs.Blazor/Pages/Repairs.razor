@@ -1,0 +1,166 @@
+@page "/repairs"
+@page "/manage/repairs"
+@inject SoundLabsApi Api
+@inject AuthStore Auth
+@inject NavigationManager Nav
+<PageTitle>@(IsEmployeeManager ? "Управление заявками на ремонт — SoundLabs" : Auth.Role == "Мастер" ? "Мои заявки в работе — SoundLabs" : "Мои ремонты — SoundLabs")</PageTitle>
+
+<div class="shell page-wrap">
+    <div class="breadcrumbs"><a href="/">Главная</a> / @(IsEmployeeManager ? "Управление" : "Личный кабинет") / @(IsEmployeeManager ? "Заявки на ремонт" : "Ремонт")</div>
+    <h1>@(IsEmployeeManager ? "Заявки на ремонт" : Auth.Role == "Мастер" ? "Назначенные мне ремонты" : "Мои заявки на ремонт")</h1>
+
+    @if (!Auth.IsLoggedIn)
+    {
+        <div class="empty-state"><h2>Войдите в аккаунт</h2><p>Заявки доступны после входа.</p><a class="btn btn-cream" href="/login">Войти</a></div>
+    }
+    else if (loading)
+    {
+        <div class="loader"><div class="eq"><i></i><i></i><i></i><i></i></div>Загружаем заявки…</div>
+    }
+    else if (!string.IsNullOrEmpty(error))
+    {
+        <p class="error">@error</p>
+    }
+    else if (repairs.Count == 0)
+    {
+        <div class="empty-state">
+            @if (Auth.Role == "Мастер")
+            {
+                <h2>Пока нет назначенных заявок</h2><p>Новые заявки появятся здесь после того, как менеджер назначит их вам.</p>
+            }
+            else if (IsEmployeeManager)
+            {
+                <h2>Новых заявок пока нет</h2><p>Заявки покупателей на ремонт и настройку появятся в этом разделе.</p>
+            }
+            else
+            {
+                <h2>Заявок пока нет</h2><p>Если инструменту нужна настройка или ремонт — оставьте заявку.</p><a class="btn btn-cream" href="/services">Оставить заявку</a>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="repair-list">
+            @for (var i = 0; i < repairs.Count; i++)
+            {
+                var r = repairs[i];
+                <article class="repair-row reveal" style="--i:@i">
+                    <div class="repair-details">
+                        <b>@r.InstrumentType @r.InstrumentModel</b>
+                        <span>@r.ServiceName · заявка №@r.Id · @r.CreatedDate.ToString("dd.MM.yyyy")</span>
+                        <small><b>Клиент:</b> @r.ClientName</small>
+                        <small>@r.FaultDescription</small>
+                    </div>
+                    <div class="repair-status">
+                        <span class="status">@r.Status</span>
+                        <small class="muted">Мастер: @(r.MasterName ?? "не назначен")</small>
+                        @if (r.PlannedDate.HasValue) { <small class="muted">Срок: @r.PlannedDate.Value.ToString("dd.MM.yyyy")</small> }
+                    </div>
+                    <strong>@r.TotalCost.ToString("N0") ₽</strong>
+                    @if (IsEmployeeManager)
+                    {
+                        <div class="repair-actions">
+                            <label>Назначить мастера</label>
+                            <select @bind="selectedMasters[r.Id]">
+                                <option value="0">Выберите мастера</option>
+                                @foreach (var m in masters) { <option value="@m.Id">@m.FullName (@m.JobTitle)</option> }
+                            </select>
+                            <label>Плановая дата</label>
+                            <input type="date" @bind="plannedDates[r.Id]" />
+                            <button class="mini-btn" @onclick="() => Assign(r.Id)">Назначить</button>
+                        </div>
+                    }
+                    else if (Auth.Role == "Мастер")
+                    {
+                        <div class="repair-actions">
+                            <label>Изменить статус</label>
+                            <select @bind="statuses[r.Id]">
+                                <option>В работе</option><option>Ожидает запчасти</option><option>Готов к выдаче</option>
+                            </select>
+                            <button class="mini-btn" @onclick="() => Update(r.Id)">Сохранить статус</button>
+                            <hr />
+                            <label>Добавить использованную запчасть</label>
+                            <select @bind="selectedParts[r.Id]"><option value="0">Выберите запчасть</option>@foreach (var p in availableParts) { <option value="@p.Id">@p.Name — @p.Stock шт. на складе</option> }</select>
+                            <label>Количество</label><input type="number" min="1" @bind="partQuantities[r.Id]" />
+                            <button class="mini-btn" @onclick="() => AddPart(r.Id)">Добавить запчасть</button>
+                            @if (r.Parts.Count > 0) { <small><b>Уже использовано:</b> @string.Join(", ", r.Parts.Select(p => $"{p.PartName} × {p.Quantity}"))</small> }
+                        </div>
+                    }
+                </article>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    bool IsEmployeeManager => Auth.Role == "Менеджер";
+    List<Repair> repairs = new();
+    List<RepairMaster> masters = new();
+    List<SparePartView> availableParts = new();
+    Dictionary<int, int> selectedParts = new();
+    Dictionary<int, int> partQuantities = new();
+    Dictionary<int, string> statuses = new();
+    Dictionary<int, int> selectedMasters = new();
+    Dictionary<int, DateTime?> plannedDates = new();
+    bool loading = true;
+    string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsLoggedIn) { loading = false; return; }
+        if (Auth.Role is not ("Покупатель" or "Мастер" or "Менеджер"))
+        { Nav.NavigateTo("/", replace: true); loading = false; return; }
+        if (Auth.Role == "Покупатель" && Nav.Uri.Contains("/manage/repairs", StringComparison.OrdinalIgnoreCase))
+        { Nav.NavigateTo("/repairs", replace: true); }
+        await Load();
+    }
+
+    async Task Load()
+    {
+        loading = true; error = null;
+        try
+        {
+            repairs = await Api.Repairs();
+            foreach (var r in repairs)
+            {
+                statuses[r.Id] = r.Status is "Новая" or "Принят" ? "В работе" : r.Status;
+                selectedMasters[r.Id] = r.MasterId ?? 0;
+                plannedDates[r.Id] = r.PlannedDate?.ToDateTime(TimeOnly.MinValue);
+            }
+            if (IsEmployeeManager) masters = await Api.RepairMasters();
+            if (Auth.Role == "Мастер") availableParts = await Api.MasterParts();
+            foreach (var r in repairs) { selectedParts[r.Id] = availableParts.FirstOrDefault()?.Id ?? 0; partQuantities[r.Id] = 1; }
+        }
+        catch (Exception e) { error = e.Message; }
+        finally { loading = false; }
+    }
+
+    async Task Assign(int id)
+    {
+        error = null;
+        if (!selectedMasters.TryGetValue(id, out var masterId) || masterId <= 0) { error = "Выберите мастера для назначения."; return; }
+        try
+        {
+            DateOnly? date = plannedDates.TryGetValue(id, out var value) && value.HasValue ? DateOnly.FromDateTime(value.Value) : null;
+            await Api.AssignRepair(id, new(masterId, date));
+            await Load();
+        }
+        catch (Exception e) { error = e.Message; }
+    }
+
+    async Task Update(int id)
+    {
+        error = null;
+        try { await Api.ChangeRepair(id, statuses[id]); await Load(); }
+        catch (Exception e) { error = e.Message; }
+    }
+
+    async Task AddPart(int id)
+    {
+        error = null;
+        if (!selectedParts.TryGetValue(id, out var partId) || partId <= 0) { error = "Выберите запчасть."; return; }
+        if (!partQuantities.TryGetValue(id, out var quantity) || quantity <= 0) { error = "Укажите положительное количество."; return; }
+        try { await Api.AddRepairPart(id, partId, quantity); await Load(); }
+        catch (Exception e) { error = e.Message; }
+    }
+}

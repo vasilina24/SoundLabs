@@ -1,0 +1,144 @@
+@page "/catalog"
+@inject SoundLabsApi Api
+@inject CartState CartStore
+@inject AuthStore Auth
+@inject NavigationManager Nav
+<PageTitle>Каталог — SoundLabs</PageTitle>
+
+<div class="shell page-wrap">
+    <div class="breadcrumbs"><a href="/">Главная</a> / Каталог</div>
+    <div class="sec-head">
+        <h1 class="page-title">Каталог товаров</h1>
+        <span class="muted">@products.Count товаров</span>
+    </div>
+
+    <div class="catalog-tools">
+        <label class="search-field">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4.5 4.5" /></svg>
+            <input placeholder="Поиск по названию или артикулу" @bind="search" @bind:event="oninput" @bind:after="Load" />
+        </label>
+    </div>
+
+    <div class="chips">
+        <button class="chip @(categoryId == null ? "selected" : "")" @onclick="() => Choose(null)">Все товары</button>
+        @foreach (var c in categories)
+        {
+            var id = c.id;
+            <button class="chip @(categoryId == id ? "selected" : "")" @onclick="() => Choose(id)">@c.name</button>
+        }
+    </div>
+
+    @if (!string.IsNullOrEmpty(error))
+    {
+        <p class="error">@error</p>
+    }
+
+    @if (loading)
+    {
+        <div class="loader"><div class="eq"><i></i><i></i><i></i><i></i></div>Загружаем товары…</div>
+    }
+    else
+    {
+        <div class="product-grid">
+            @if (products.Count == 0)
+            {
+                <div class="empty-state">
+                    <h2>Ничего не найдено</h2>
+                    <p>Попробуйте изменить запрос или выбрать другую категорию.</p>
+                </div>
+            }
+            @foreach (var p in products)
+            {
+                <article class="product-card" @key="p.Id">
+                    <div class="product-photo">
+                        <img src="@Api.ProductImageUrl(p.ImageUrl)" alt="@p.Name" />
+                        <span class="product-tag">@p.Category</span>
+                    </div>
+                    <div class="product-info">
+                        <small>Артикул @p.Article</small>
+                        <h3>@p.Name</h3>
+                        <p class="description">@p.Description</p>
+                        <div class="stock @(p.Available > 0 ? "" : "out")">@(p.Available > 0 ? $"В наличии: {p.Available}" : "Нет в наличии")</div>
+                        <div class="product-bottom">
+                            <b>@p.Price.ToString("N0") ₽</b>
+                            <button class="add-btn" disabled="@(p.Available < 1)" @onclick="() => CartStore.Add(p)">В корзину</button>
+                        </div>
+                    </div>
+                </article>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    // Параметры адреса: /catalog?search=гитара и /catalog?categoryId=2
+    [SupplyParameterFromQuery(Name = "search")] public string? SearchQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "categoryId")] public int? CategoryQuery { get; set; }
+
+    List<Product> products = new();
+    List<Category> categories = new();
+    string search = "";
+    int? categoryId;
+    string? error;
+    bool loading = true;
+    bool firstLoad = true;
+    string? lastSearch;
+    int? lastCategory;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Каталог доступен гостям и покупателям, но не сотрудникам.
+        if (Auth.IsLoggedIn && Auth.Role != "Покупатель")
+        {
+            Nav.NavigateTo(EmployeeHome());
+            return;
+        }
+
+        if (firstLoad)
+        {
+            try { categories = await Api.Categories(); }
+            catch (Exception e) { error = e.Message; }
+        }
+
+        if (firstLoad || SearchQuery != lastSearch || CategoryQuery != lastCategory)
+        {
+            firstLoad = false;
+            lastSearch = SearchQuery;
+            lastCategory = CategoryQuery;
+            search = SearchQuery ?? "";
+            categoryId = CategoryQuery;
+            await Load();
+        }
+    }
+
+    string EmployeeHome() => Auth.Role switch
+    {
+        "Администратор" => "/manage/employees",
+        "Менеджер" => "/manage/orders",
+        "Мастер" => "/repairs",
+        _ => "/profile"
+    };
+
+    async Task Load()
+    {
+        try
+        {
+            products = await Api.Products(search, categoryId);
+            error = null;
+        }
+        catch (Exception e)
+        {
+            error = e.Message;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    async Task Choose(int? id)
+    {
+        categoryId = id;
+        await Load();
+    }
+}

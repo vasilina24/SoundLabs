@@ -1,0 +1,271 @@
+@page "/manage/products"
+@inject SoundLabsApi Api
+@inject AuthStore Auth
+@using Microsoft.AspNetCore.Components.Forms
+<PageTitle>Управление товарами — SoundLabs</PageTitle>
+
+<div class="shell page-wrap">
+    <div class="breadcrumbs"><a href="/">Главная</a> / Управление</div>
+    <h1>Управление товарами</h1>
+
+    @if (Auth.Role != "Менеджер")
+    {
+        <div class="empty-state">
+            <h2>Нет доступа</h2>
+            <p>Раздел доступен только менеджеру.</p>
+        </div>
+    }
+    else
+    {
+        <div class="admin-form">
+            <h3>@(editId is null ? "Добавить товар" : "Редактировать товар")</h3>
+            <div class="form-grid">
+                <div><label>Артикул</label><input @bind="form.Article" /></div>
+                <div><label>Название</label><input @bind="form.Name" /></div>
+                <div><label>Цена</label><input type="number" @bind="form.Price" /></div>
+                <div><label>Количество на складе</label><input type="number" @bind="form.StockQuantity" /></div>
+                <div><label>Минимальный остаток</label><input type="number" @bind="form.MinQuantity" /></div>
+                <div>
+                    <label>Категория</label>
+                    <select @bind="form.CategoryId">
+                        <option value="0">Выберите</option>
+                        @foreach (var c in categories)
+                        {
+                            <option value="@c.id">@c.name</option>
+                        }
+                    </select>
+                </div>
+            </div>
+            <label>Описание</label>
+            <textarea @bind="form.Description" rows="3"></textarea>
+            <div class="product-image-upload">
+                <label>Фотография товара (JPG, PNG или WEBP, до 5 МБ)</label>
+                <InputFile OnChange="ChooseImage" accept="image/jpeg,image/png,image/webp" />
+                @if (!string.IsNullOrWhiteSpace(previewImageUrl))
+                {
+                    <div class="product-image-preview">
+                        <img src="@previewImageUrl" alt="Предпросмотр фотографии товара" />
+                        <button type="button" class="mini-btn danger" @onclick="RemoveSelectedImage">Убрать выбранное фото</button>
+                    </div>
+                }
+                else if (!string.IsNullOrWhiteSpace(currentImageUrl))
+                {
+                    <div class="product-image-preview"><img src="@Api.ProductImageUrl(currentImageUrl)" alt="Текущая фотография товара" /></div>
+                }
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-cream" @onclick="Save" disabled="@saving">@(saving ? "Сохранение…" : "Сохранить товар")</button>
+                <button class="btn btn-ghost" @onclick="Reset">Очистить</button>
+            </div>
+            @if (!string.IsNullOrEmpty(message))
+            {
+                <p class="@(ok ? "success" : "error")">@message</p>
+            }
+        </div>
+
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Артикул</th>
+                        <th>Наименование</th>
+                        <th>Категория</th>
+                        <th>Цена</th>
+                        <th>Остаток</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var p in products)
+                    {
+                        <tr @key="p.Id">
+                            <td>@p.Article</td>
+                            <td>@p.Name</td>
+                            <td>@p.Category</td>
+                            <td>@p.Price.ToString("N0") ₽</td>
+                            <td>@p.Available</td>
+                            <td>
+                                <button class="mini-btn" @onclick="() => Edit(p)">Изменить</button>
+                                <button class="mini-btn danger" @onclick="() => Delete(p.Id)">Удалить</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    // Форма с изменяемыми полями (у record ProductSave свойства только для чтения)
+    class ProductForm
+    {
+        public string Article { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string? Description { get; set; }
+        public decimal Price { get; set; }
+        public int StockQuantity { get; set; }
+        public int MinQuantity { get; set; }
+        public int CategoryId { get; set; }
+    }
+
+    List<Product> products = new();
+    List<Category> categories = new();
+    ProductForm form = new();
+    int? editId;
+    string? message;
+    bool ok;
+    bool saving;
+    byte[]? selectedImageBytes;
+    string? selectedImageName;
+    string? selectedImageContentType;
+    string? previewImageUrl;
+    string? currentImageUrl;
+    const long MaxImageSize = 5 * 1024 * 1024;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Auth.Role == "Менеджер")
+        {
+            try
+            {
+                products = await Api.Products();
+                categories = await Api.Categories();
+            }
+            catch (Exception e)
+            {
+                ok = false;
+                message = e.Message;
+            }
+        }
+    }
+
+    async Task Save()
+    {
+        if (saving) return;
+        if (string.IsNullOrWhiteSpace(form.Article) || string.IsNullOrWhiteSpace(form.Name))
+        {
+            ok = false;
+            message = "Заполните артикул и название товара.";
+            return;
+        }
+        if (form.CategoryId <= 0 || !categories.Any(c => c.id == form.CategoryId))
+        {
+            ok = false;
+            message = "Выберите существующую категорию товара.";
+            return;
+        }
+        if (form.Price < 0 || form.StockQuantity < 0 || form.MinQuantity < 0)
+        {
+            ok = false;
+            message = "Цена и количество не могут быть отрицательными.";
+            return;
+        }
+
+        saving = true;
+        message = null;
+        try
+        {
+            var savedProductId = await Api.SaveProduct(new ProductSave(form.Article.Trim(), form.Name.Trim(), form.Description?.Trim(), form.Price, form.StockQuantity, form.MinQuantity, form.CategoryId), editId);
+            editId = savedProductId; // если загрузка фото не удастся, повторное сохранение обновит этот товар, а не создаст дубликат
+            if (selectedImageBytes is not null)
+                await Api.UploadProductImage(savedProductId, selectedImageBytes, selectedImageName!, selectedImageContentType!);
+            products = await Api.Products();
+            Reset();
+            ok = true;
+            message = "Товар успешно сохранён.";
+        }
+        catch (Exception e)
+        {
+            ok = false;
+            message = e.Message;
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    void Edit(Product p)
+    {
+        editId = p.Id;
+        form = new ProductForm
+        {
+            Article = p.Article,
+            Name = p.Name,
+            Description = p.Description,
+            Price = p.Price,
+            StockQuantity = p.Available,
+            MinQuantity = 0,
+            CategoryId = p.CategoryId
+        };
+        currentImageUrl = p.ImageUrl;
+        RemoveSelectedImage();
+    }
+
+    void Reset()
+    {
+        editId = null;
+        form = new ProductForm();
+        currentImageUrl = null;
+        RemoveSelectedImage();
+    }
+
+    async Task ChooseImage(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file.Size > MaxImageSize)
+        {
+            RemoveSelectedImage();
+            ok = false;
+            message = "Размер фотографии не должен превышать 5 МБ.";
+            return;
+        }
+        var contentType = file.ContentType.ToLowerInvariant();
+        if (contentType is not ("image/jpeg" or "image/png" or "image/webp"))
+        {
+            RemoveSelectedImage();
+            ok = false;
+            message = "Выберите фотографию в формате JPG, PNG или WEBP.";
+            return;
+        }
+        try
+        {
+            await using var stream = file.OpenReadStream(MaxImageSize);
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+            selectedImageBytes = memory.ToArray();
+            selectedImageName = Path.GetFileName(file.Name);
+            selectedImageContentType = contentType;
+            previewImageUrl = $"data:{contentType};base64,{Convert.ToBase64String(selectedImageBytes)}";
+            message = null;
+        }
+        catch (Exception ex)
+        {
+            ok = false;
+            message = $"Не удалось прочитать фотографию: {ex.Message}";
+        }
+    }
+
+    void RemoveSelectedImage()
+    {
+        selectedImageBytes = null;
+        selectedImageName = null;
+        selectedImageContentType = null;
+        previewImageUrl = null;
+    }
+
+    async Task Delete(int id)
+    {
+        try
+        {
+            await Api.DeleteProduct(id);
+            products = await Api.Products();
+        }
+        catch (Exception e)
+        {
+            ok = false;
+            message = e.Message;
+        }
+    }
+}
